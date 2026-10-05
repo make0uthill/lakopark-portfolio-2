@@ -3,14 +3,19 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
 const $ = (s) => document.querySelector(s);
 const coarse = matchMedia("(pointer: coarse)").matches;
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const FILES = [["assets/3d/site.glb", 14820748], ["assets/3d/veg.glb", 1511320]];
+// file list + sizes come from modell.html (written by build.py): GitHub loads one meshopt-compressed site.glb,
+// the claude.ai artifact loads uncompressed parts (no WebAssembly decoder needed there)
+const CFG = window.MODEL_CFG || { meshopt: true, files: [["assets/3d/site.glb", 14824668], ["assets/3d/veg.glb", 1511320]] };
+const FILES = CFG.files;                         // the last file is the vegetation
 const BOUNDS = { x: 942, z: 628, yMin: -5, yMax: 90 };          // target stays above the terrain plate
 const SUN_FROM = new THREE.Vector3(-0.4925, 0.643, -0.587).normalize();   // the render sun (north-west, 40° high)
+// satellite image on the terrain: the Blender material maps it by world position, u = x·a + b, v = y·c + d (Blender metres);
+// model space is x_b = X − 14, y_b = −Z − 93. It loads as a plain image (CFG.sat), not embedded in the GLB.
+const SAT_MAP = [0.0005307515966705978, 0.5074324011802673, 0.0007961274241097271, 0.5737457871437073];
 
 const load = $("#load"), loadBar = $("#load-bar"), loadN = $("#load-n"), loadT = $("#load-t");
 function fail(msg) {
@@ -81,7 +86,7 @@ const VIEWS = {
   heviz:      { t: V(-171, 8, -263), p: V(-123, 147, -442) },
   hazak:      { t: V(89, 4, -127), p: V(-6, 143, 9) },
   keszthely:  { t: V(544, 8, -43), p: V(581, 116, -182) },
-  felul:      { t: V(190, 0, -80), p: V(190, 1020, -79.9), fit: true },
+  felul:      { t: V(190, 0, -50), p: V(190, 1180, -49.9), fit: true },
 };
 function viewPose(name) {
   const v = VIEWS[name];
@@ -229,21 +234,73 @@ renderer.setAnimationLoop(() => {
 // ------------------------------------------------------------------ load
 resize();
 goTo(viewPose("attekintes"), 0);
-const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+const loader = new GLTFLoader();
 const got = FILES.map(() => 0);
-const total = FILES.reduce((a, f) => a + f[1], 0);
+const SAT = CFG.sat || ["assets/3d/muhold.jpg", 5592696];
+got.push(0);                                     // the last slot: the satellite image
+const total = FILES.reduce((a, f) => a + (Array.isArray(f) ? f[1] : f.size), 0) + SAT[1];
 function progress() {
   const p = Math.min(got.reduce((a, b) => a + b, 0) / total, 1);
   loadBar.style.width = (p * 100).toFixed(1) + "%";
   loadN.textContent = Math.round(p * 100) + " %";
 }
 const maxAniso = renderer.capabilities.getMaxAnisotropy();
-Promise.all(FILES.map(([url], i) => loader.loadAsync(url, (e) => { got[i] = e.loaded; progress(); })))
-  .then(([site, vegG]) => {
-    siteRoot = site.scene;
+// the claude.ai artifact serves no .glb files: there each GLB comes as base64 text in one or more .txt chunks
+async function loadB64(f, i) {
+  let text = "";
+  for (const url of f.b64) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(url + " " + r.status);
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await rd.read();
+      if (done) break;
+      got[i] += value.length; progress();
+      text += dec.decode(value, { stream: true });
+    }
+    text += dec.decode();
+  }
+  const bin = atob(text.replace(/\s+/g, ""));
+  const buf = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) buf[k] = bin.charCodeAt(k);
+  return loader.parseAsync(buf.buffer, "");
+}
+
+async function decoder() {
+  if (!CFG.meshopt) return;
+  const { MeshoptDecoder } = await import("three/addons/libs/meshopt_decoder.module.js");
+  await MeshoptDecoder.ready;
+  loader.setMeshoptDecoder(MeshoptDecoder);
+}
+decoder()
+  .then(() => Promise.all([...FILES.map((f, i) => (Array.isArray(f)
+    ? loader.loadAsync(f[0], (e) => { got[i] = e.loaded; progress(); })
+    : loadB64(f, i))),
+    new THREE.TextureLoader().loadAsync(SAT[0]).then((t) => { got[got.length - 1] = SAT[1]; progress(); return t; })]))
+  .then((res) => {
+    const sat = res.pop();
+    sat.colorSpace = THREE.SRGBColorSpace;
+    sat.flipY = false;
+    sat.wrapS = sat.wrapT = THREE.ClampToEdgeWrapping;
+    sat.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    const vegG = res.pop();
+    siteRoot = new THREE.Group();
+    res.forEach((r) => siteRoot.add(r.scene));
+    siteRoot.updateMatrixWorld(true);
+    const wp = new THREE.Vector3();
     siteRoot.traverse((o) => {
       if (!o.isMesh) return;
       const m = o.material;
+      if (m.name === "muhold") {                  // terrain: UVs from world x/z, then the satellite image
+        const pos = o.geometry.attributes.position, uv = new Float32Array(pos.count * 2);
+        for (let k = 0; k < pos.count; k++) {
+          wp.fromBufferAttribute(pos, k).applyMatrix4(o.matrixWorld);
+          uv[2 * k] = (wp.x - 14) * SAT_MAP[0] + SAT_MAP[1];
+          uv[2 * k + 1] = 1 - ((-wp.z - 93) * SAT_MAP[2] + SAT_MAP[3]);
+        }
+        o.geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+        m.map = sat; m.needsUpdate = true;
+      }
       o.receiveShadow = true;
       o.castShadow = !m.transparent;
       if (m.map) { m.map.anisotropy = maxAniso; }
@@ -272,3 +329,4 @@ Promise.all(FILES.map(([url], i) => loader.loadAsync(url, (e) => { got[i] = e.lo
 window.__view = (name) => { setPressed(name); goTo(viewPose(name), 0); };
 window.__pose = (p, t) => { setPressed(null); goTo({ p: V(...p), t: V(...t) }, 0); };
 window.__render = () => { dirty = true; };
+window.__fov = (f) => { camera.fov = f; camera.updateProjectionMatrix(); dirty = true; };
