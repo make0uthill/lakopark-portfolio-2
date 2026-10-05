@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>A lakópark 3D modellje</title>
+<meta name="description" content="A Hévíz–Keszthely lakópark böngészőben forgatható és nagyítható 3D modellje.">
+<meta name="theme-color" content="#0E1511">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&amp;display=swap">
+<style>
+:root {
+  --forest: #0E1511; --forest-2: #161F1A; --forest-line: #2A362F;
+  --mist: #E6EAE4; --mist-2: #A3ACA5; --lav: #B9AEEC; --ink: #141B16;
+  --f-display: "Archivo", "Arial Narrow", Arial, sans-serif;
+  --pad: clamp(16px, 2.6vw, 32px);
+  --glass: rgba(14, 21, 17, .74);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: radial-gradient(130% 100% at 50% 30%, #2A3830 0%, #141D18 52%, #0A0F0C 100%) fixed var(--forest);
+  color: var(--mist); font-family: var(--f-display); -webkit-font-smoothing: antialiased;
+}
+#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; cursor: grab; }
+#c:active { cursor: grabbing; }
+
+.top {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 2;
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: calc(var(--pad) - 4px) var(--pad) 40px;
+  background: linear-gradient(rgba(10, 15, 12, .82), rgba(10, 15, 12, 0));
+  pointer-events: none;
+}
+.top > * { pointer-events: auto; }
+.back {
+  font: 500 14px/1 var(--f-display); color: var(--mist); text-decoration: none; white-space: nowrap;
+  padding: 10px 14px; border: 1px solid var(--forest-line); border-radius: 999px; background: var(--glass);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.back:hover { border-color: var(--mist-2); }
+.back:focus-visible, .ui button:focus-visible, .sw input:focus-visible + span, .compass:focus-visible { outline: 2px solid var(--lav); outline-offset: 2px; }
+h1 { margin: 0; font: 650 clamp(19px, 2.1vw, 26px)/1.1 var(--f-display); font-stretch: 112%; letter-spacing: -.01em; }
+.sub { margin: 0; font: 400 14px/1.3 var(--f-display); color: var(--mist-2); flex-basis: 100%; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+h1 { text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+
+.ui { position: fixed; z-index: 2; left: var(--pad); bottom: calc(var(--pad) + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: calc(100vw - 2 * var(--pad)); }
+.bar-box {
+  display: flex; gap: 4px; padding: 5px; max-width: 100%;
+  background: var(--glass); border: 1px solid var(--forest-line); border-radius: 14px;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.views { overflow-x: auto; scrollbar-width: none; }
+.views::-webkit-scrollbar { display: none; }
+.views button {
+  flex: none; font: 500 14px/1 var(--f-display); color: var(--mist); background: transparent; border: 0;
+  padding: 11px 14px; border-radius: 10px; cursor: pointer; white-space: nowrap;
+}
+.views button:hover { background: rgba(230, 234, 228, .08); }
+.views button[aria-pressed="true"] { background: var(--lav); color: var(--ink); }
+.sw { position: relative; display: inline-flex; cursor: pointer; }
+.sw input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.sw span { display: inline-flex; align-items: center; gap: 9px; font: 500 14px/1 var(--f-display); padding: 9px 12px 9px 9px; border-radius: 10px; color: var(--mist-2); }
+.sw span::before { content: ""; width: 30px; height: 18px; border-radius: 9px; background: #3A4740; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+  background-image: radial-gradient(circle at 9px 9px, #C9D0CA 6px, transparent 6.5px); transition: background .15s; }
+.sw input:checked + span { color: var(--mist); }
+.sw input:checked + span::before { background-color: #6E62B0; background-image: radial-gradient(circle at 21px 9px, #fff 6px, transparent 6.5px); }
+.sw:hover span { background: rgba(230, 234, 228, .06); }
+
+.help {
+  position: fixed; z-index: 2; right: var(--pad); bottom: calc(var(--pad) + env(safe-area-inset-bottom, 0px)); margin: 0;
+  max-width: 330px; font: 400 13px/1.5 var(--f-display); color: var(--mist-2); transition: opacity .6s;
+  background: var(--glass); border: 1px solid var(--forest-line); border-radius: 12px; padding: 10px 13px;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.help b { font-weight: 600; color: var(--mist); }
+.compass {
+  position: fixed; z-index: 2; top: calc(var(--pad) - 4px); right: var(--pad); width: 46px; height: 46px; padding: 0; border-radius: 50%;
+  background: var(--glass); border: 1px solid var(--forest-line); color: var(--mist); cursor: pointer;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.compass svg { width: 100%; height: 100%; display: block; transition: transform .05s linear; }
+.compass:hover { border-color: var(--mist-2); }
+
+.load { position: fixed; inset: 0; z-index: 3; display: grid; place-items: center; transition: opacity .6s; background: rgba(10, 15, 12, .35); }
+.load.done { opacity: 0; pointer-events: none; }
+.load-in { width: min(320px, 80vw); text-align: center; }
+.load-t { margin: 0 0 14px; font: 500 15px/1.3 var(--f-display); color: var(--mist); }
+.load .track { height: 3px; border-radius: 2px; background: #2E3A33; overflow: hidden; }
+.load .track i { display: block; height: 100%; width: 0; background: var(--lav); transition: width .2s; }
+.load-n { margin: 10px 0 0; font: 400 13px/1 var(--f-display); color: var(--mist-2); font-variant-numeric: tabular-nums; }
+.load.err .track { display: none; }
+
+@media (max-width: 760px) {
+  .top { gap: 10px 14px; padding-bottom: 28px; }
+  .sub { display: none; }
+  .help { left: var(--pad); right: auto; bottom: auto; top: 112px; max-width: 280px; }
+  .help.gone { opacity: 0; pointer-events: none; }
+  .views button { padding: 11px 12px; }
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .top { padding-bottom: 12px; }
+  .help { display: none; }
+  .ui { flex-direction: row; align-items: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) { .load, .help { transition: none; } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./assets/vendor/three/three.module.min.js", "three/addons/": "./assets/vendor/three/addons/" } }
+</script>
+</head>
+<body>
+<canvas id="c" tabindex="0" role="img" aria-label="A lakópark 3D modellje. Egérrel, ujjal vagy a nyílbillentyűkkel mozgatható."></canvas>
+
+<header class="top">
+  <a class="back" href="./#modell">Vissza a portfólióhoz</a>
+  <h1>A lakópark 3D modellje</h1>
+  <p class="sub">Hévíz–Keszthely, középületek, 98 ikerház, fasétány, kb. 28 000 fa és cserje</p>
+</header>
+
+<button class="compass" id="compass" type="button" aria-label="Fordítás északi tájolásra" title="Északi tájolás">
+  <svg viewBox="0 0 46 46" aria-hidden="true"><g id="needle">
+    <path d="M23 7 L28 23 L18 23 Z" fill="#B9AEEC"/><path d="M23 39 L28 23 L18 23 Z" fill="#5B6660"/>
+    <text x="23" y="6.2" text-anchor="middle" font-family="Archivo, Arial, sans-serif" font-size="7" font-weight="700" fill="#E6EAE4">É</text></g></svg>
+</button>
+
+<div class="ui">
+  <div class="bar-box views" role="group" aria-label="Nézőpontok">
+    <button type="button" data-v="attekintes" aria-pressed="true">Áttekintés</button>
+    <button type="button" data-v="heviz" aria-pressed="false">Hévízi központ</button>
+    <button type="button" data-v="hazak" aria-pressed="false">Lakóházak</button>
+    <button type="button" data-v="keszthely" aria-pressed="false">Keszthelyi központ</button>
+    <button type="button" data-v="felul" aria-pressed="false">Felülnézet</button>
+  </div>
+  <div class="bar-box">
+    <label class="sw"><input type="checkbox" id="t-veg" checked><span>Növényzet</span></label>
+    <label class="sw"><input type="checkbox" id="t-sh" checked><span>Árnyékok</span></label>
+  </div>
+</div>
+
+<p class="help" id="help"></p>
+
+<div class="load" id="load" role="status" aria-live="polite">
+  <div class="load-in"><p class="load-t" id="load-t">A modell betöltése</p><div class="track"><i id="load-bar"></i></div><p class="load-n" id="load-n">0 %</p></div>
+</div>
+<noscript><p style="position:fixed;inset:auto 0 45%;text-align:center">A 3D modell megjelenítéséhez JavaScript szükséges.</p></noscript>
+<script type="module" src="assets/3d/viewer.js"></script>
+</body>
+</html>
